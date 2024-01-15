@@ -56,11 +56,16 @@ func New(fasta string) (*Faidx, error) {
 	return &Faidx{rdr, idx, smap}, nil
 }
 
-func position(r fai.Record, p int) int64 {
-	if p < 0 || r.Length < p {
-		panic(fmt.Sprintf("fai: index [%d] out of range in %s which has length: %d", p, r.Name, r.Length))
+func position(r fai.Record, p int) (int64, error) {
+	if p < 0 {
+		return 0, fmt.Errorf("position %d was negative", p)
 	}
-	return r.Start + int64(p/r.BasesPerLine*r.BytesPerLine+p%r.BasesPerLine)
+
+	if r.Length < p {
+		return 0, fmt.Errorf("position %d was beyond the upper bound %d of %s", p, r.Length, r.Name)
+	}
+
+	return r.Start + int64(p/r.BasesPerLine*r.BytesPerLine+p%r.BasesPerLine), nil
 }
 
 // Get takes a position and returns the string sequence. Start and end are 0-based.
@@ -82,8 +87,16 @@ func (f *Faidx) GetRaw(chrom string, start int, end int) ([]byte, error) {
 		return nil, fmt.Errorf("unknown sequence %s", chrom)
 	}
 
-	pstart := position(idx, start)
-	pend := position(idx, end)
+	pstart, err := position(idx, start)
+	if err != nil {
+		return nil, err
+	}
+
+	pend, err := position(idx, end)
+	if err != nil {
+		return nil, err
+	}
+
 	return f.mmap[pstart:pend], nil
 }
 
@@ -113,8 +126,17 @@ func (f *Faidx) Stats(chrom string, start int, end int) (Stats, error) {
 	if !ok {
 		return Stats{}, fmt.Errorf("unknown sequence %s", chrom)
 	}
-	pstart := position(idx, start)
-	pend := position(idx, end)
+
+	pstart, err := position(idx, start)
+	if err != nil {
+		return Stats{}, err
+	}
+
+	pend, err := position(idx, end)
+	if err != nil {
+		return Stats{}, err
+	}
+
 	oend := pend
 	if pend < int64(len(f.mmap)) {
 		oend++
@@ -215,7 +237,17 @@ func (f *Faidx) Q(pos *FaPos) (uint32, error) {
 	if pos.lastStart > pos.Start || pos.Start >= pos.lastEnd || pos.lastEnd > pos.End || pos.Chrom != pos.lastChrom {
 		pos.lastChrom = pos.Chrom
 		pos.As, pos.Cs, pos.Gs, pos.Ts = 0, 0, 0, 0
-		for _, b := range f.mmap[position(idx, pos.Start):position(idx, pos.End)] {
+
+		safeStart, err := position(idx, pos.Start)
+		if err != nil {
+			return 0, err
+		}
+		safeEnd, err := position(idx, pos.End)
+		if err != nil {
+			return 0, err
+		}
+
+		for _, b := range f.mmap[safeStart:safeEnd] {
 			switch b {
 			case 'G', 'g':
 				pos.Gs++
@@ -232,7 +264,15 @@ func (f *Faidx) Q(pos *FaPos) (uint32, error) {
 		 ls -------------- le
 		       s----------------e
 		*/
-		for _, b := range f.mmap[position(idx, pos.lastStart):position(idx, pos.Start)] {
+		safeStart, err := position(idx, pos.lastStart)
+		if err != nil {
+			return 0, err
+		}
+		safeEnd, err := position(idx, pos.Start)
+		if err != nil {
+			return 0, err
+		}
+		for _, b := range f.mmap[safeStart:safeEnd] {
 			switch b {
 			case 'G', 'g':
 				pos.Gs--
@@ -255,7 +295,16 @@ func (f *Faidx) Q(pos *FaPos) (uint32, error) {
 				}
 			*/
 		}
-		for _, b := range f.mmap[position(idx, pos.lastEnd):position(idx, pos.End)] {
+
+		safeStart, err = position(idx, pos.lastEnd)
+		if err != nil {
+			return 0, err
+		}
+		safeEnd, err = position(idx, pos.End)
+		if err != nil {
+			return 0, err
+		}
+		for _, b := range f.mmap[safeStart:safeEnd] {
 			switch b {
 			case 'G', 'g':
 				pos.Gs++
@@ -281,7 +330,11 @@ func (f *Faidx) At(chrom string, pos int) (byte, error) {
 		return '*', fmt.Errorf("unknown sequence %s", chrom)
 	}
 
-	ppos := position(idx, pos)
+	ppos, err := position(idx, pos)
+	if err != nil {
+		return 0, err
+	}
+
 	return f.mmap[ppos], nil
 }
 

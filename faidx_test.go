@@ -3,7 +3,7 @@ package faidx_test
 import (
 	"testing"
 
-	"github.com/brentp/faidx"
+	"github.com/carbocation/faidx"
 
 	. "gopkg.in/check.v1"
 )
